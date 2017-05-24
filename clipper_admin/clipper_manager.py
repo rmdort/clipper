@@ -855,11 +855,28 @@ class Clipper:
                             self._execute_put(model_data_path, vol)
 
             print("Copied model data to host")
+            # Remove old models
+            self.remove_old_models(name)
             # aggregate results of starting all containers
             return all([
                 self.add_container(name, version)
                 for r in range(num_containers)
             ])
+
+    def remove_old_models (self, model_name):
+        containers = self._execute_root(
+            "docker ps -aq -n 10 --filter label={model_name}".format(
+                model_name=model_name))
+        container_ids = [l.strip() for l in containers.split("\n")]
+        print("Clipper container IDS found: %s" % str(container_ids))
+        print("Stopping Clipper and all running models...")
+        with hide("output", "warnings", "running"):
+            container_id_str = " ".join(container_ids)
+            self._execute_root(
+                "docker stop {ids}".format(ids=container_id_str),
+                warn_only=True)
+            self._execute_root(
+                "docker rm {ids}".format(ids=container_id_str), warn_only=True)
 
     def add_container(self, model_name, model_version):
         """Create a new container for an existing model.
@@ -917,7 +934,7 @@ class Clipper:
                 add_container_cmd = (
                     "docker run -d --network={nw} --restart={restart_policy} -v {path}:/model:ro "
                     "-e \"CLIPPER_MODEL_NAME={mn}\" -e \"CLIPPER_MODEL_VERSION={mv}\" "
-                    "-e \"CLIPPER_IP=query_frontend\" -e \"CLIPPER_INPUT_TYPE={mip}\" -l \"{clipper_label}\" "
+                    "-e \"CLIPPER_IP=query_frontend\" -e \"CLIPPER_INPUT_TYPE={mip}\" -l \"{clipper_label}\" -l \"{mn}\" "
                     "{image}".format(
                         path=model_data_path,
                         nw=DOCKER_NW,
@@ -1009,6 +1026,8 @@ class Clipper:
             selected model version.
 
         """
+        # Remove old models
+        self.remove_old_models(model_name)
         url = "http://%s:%d/admin/set_model_version" % (
             self.host, CLIPPER_MANAGEMENT_PORT)
         req_json = json.dumps({
